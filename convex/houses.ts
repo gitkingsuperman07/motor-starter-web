@@ -29,7 +29,12 @@ async function requireUserId(ctx: Parameters<typeof getAuthUserId>[0]) {
 }
 
 function generateHouseKey() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let key = "";
+  for (let index = 0; index < 6; index += 1) {
+    key += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return key;
 }
 
 async function getMembership(ctx: any, userId: any) {
@@ -203,6 +208,9 @@ export const joinHouseWithKey = mutation({
 
     const now = Date.now();
     const normalizedKey = args.key.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(normalizedKey)) {
+      throw new ConvexError("Invalid house key");
+    }
 
     const invite = await ctx.db
       .query("houseKeys")

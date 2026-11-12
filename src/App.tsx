@@ -4,6 +4,7 @@ import {
   Authenticated,
   Unauthenticated,
   useAction,
+  useConvex,
   useConvexAuth,
   useMutation,
   useQuery,
@@ -130,9 +131,12 @@ function Dashboard({
   const [now, setNow] = useState(() => Date.now());
   const autoStopTimerRef = useRef<number | null>(null);
   const buttonLabelTimerRef = useRef<number | null>(null);
+  const scheduledMinutesRef = useRef<string | null>(null);
   const [buttonLabel, setButtonLabel] = useState<"START" | "STOP" | null>(null);
   const [houseName, setHouseName] = useState("");
   const [joinKey, setJoinKey] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [newUserName, setNewUserName] = useState("");
   const [newUserPhone, setNewUserPhone] = useState("");
@@ -199,6 +203,14 @@ function Dashboard({
   };
 
   useEffect(() => {
+    if (motorState && status?.lastCommand?.type === motorState) {
+      setMotorState(null);
+    }
+  }, [motorState, status?.lastCommand?.type]);
+
+  const commanded = motorState ?? status?.lastCommand?.type ?? null;
+
+  useEffect(() => {
     if (timerEndsAt === null) {
       return;
     }
@@ -207,12 +219,52 @@ function Dashboard({
   }, [timerEndsAt]);
 
   useEffect(() => {
-    if (motorState && status?.lastCommand?.type === motorState) {
-      setMotorState(null);
-    }
-  }, [motorState, status?.lastCommand?.type]);
+    const clearCountdown = () => {
+      if (autoStopTimerRef.current !== null) {
+        window.clearTimeout(autoStopTimerRef.current);
+        autoStopTimerRef.current = null;
+      }
+      scheduledMinutesRef.current = null;
+      setTimerEndsAt(null);
+    };
 
-  const commanded = motorState ?? status?.lastCommand?.type ?? null;
+    if (!timerEnabled || commanded !== "START") {
+      clearCountdown();
+      return;
+    }
+
+    const minutes = Number(timerMinutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      clearCountdown();
+      return;
+    }
+
+    if (scheduledMinutesRef.current === timerMinutes && autoStopTimerRef.current !== null) {
+      return;
+    }
+
+    if (autoStopTimerRef.current !== null) {
+      window.clearTimeout(autoStopTimerRef.current);
+    }
+
+    const startedAt = Date.now();
+    scheduledMinutesRef.current = timerMinutes;
+    setNow(startedAt);
+    setTimerEndsAt(startedAt + minutes * 60 * 1000);
+    autoStopTimerRef.current = window.setTimeout(() => {
+      void sendCommand({ type: "STOP" })
+        .then(() => {
+          setMotorState("STOP");
+          showButtonResult("STOP");
+          setTimerNotice("Timer ended. STOP command sent.");
+        })
+        .catch(() => setTimerNotice("Timer ended, but STOP command failed."));
+      autoStopTimerRef.current = null;
+      scheduledMinutesRef.current = null;
+      setTimerEndsAt(null);
+    }, minutes * 60 * 1000);
+    setTimerNotice(`Auto STOP set for ${minutes} minute${minutes > 1 ? "s" : ""}.`);
+  }, [timerEnabled, timerMinutes, commanded, sendCommand]);
 
   const statusLabel = useMemo(() => {
     if (!status || !status.house) {
@@ -270,31 +322,9 @@ function Dashboard({
           window.clearTimeout(autoStopTimerRef.current);
           autoStopTimerRef.current = null;
         }
+        scheduledMinutesRef.current = null;
         setTimerNotice(null);
         setTimerEndsAt(null);
-      }
-
-      if (type === "START" && timerEnabled) {
-        const minutes = Number(timerMinutes);
-        if (Number.isFinite(minutes) && minutes > 0) {
-          if (autoStopTimerRef.current !== null) {
-            window.clearTimeout(autoStopTimerRef.current);
-          }
-          const endsAt = Date.now() + minutes * 60 * 1000;
-          setTimerEndsAt(endsAt);
-          autoStopTimerRef.current = window.setTimeout(() => {
-            void sendCommand({ type: "STOP" })
-              .then(() => {
-                setMotorState("STOP");
-                showButtonResult("STOP");
-                setTimerNotice("Timer ended. STOP command sent.");
-              })
-              .catch(() => setTimerNotice("Timer ended, but STOP command failed."));
-            autoStopTimerRef.current = null;
-            setTimerEndsAt(null);
-          }, minutes * 60 * 1000);
-          setTimerNotice(`Auto STOP set for ${minutes} minute${minutes > 1 ? "s" : ""}.`);
-        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send command");
@@ -339,20 +369,32 @@ function Dashboard({
           <p className={eyebrow}>Access</p>
           <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-950">Join with private key</h2>
           <p className="mt-1.5 text-sm text-zinc-500">
-            Enter the active key shared by the admin.
+            Enter the 6-character key shared by the admin.
           </p>
           <input
             className={`${field} mt-5 uppercase tracking-[0.18em]`}
-            placeholder="Enter house key"
+            placeholder="6-character key"
             value={joinKey}
-            onChange={(e) => setJoinKey(e.target.value.toUpperCase())}
+            maxLength={6}
+            onChange={(e) => {
+              setJoinError(null);
+              setJoinKey(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6));
+            }}
           />
           <button
-            className="mt-3 w-full rounded-2xl bg-zinc-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800"
-            onClick={() => void joinHouseWithKey({ key: joinKey })}
+            className="mt-3 flex w-full items-center justify-center rounded-2xl bg-zinc-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            disabled={joining || joinKey.length !== 6}
+            onClick={() => {
+              setJoining(true);
+              setJoinError(null);
+              void joinHouseWithKey({ key: joinKey })
+                .catch((err) => setJoinError(friendlyError(err)))
+                .finally(() => setJoining(false));
+            }}
           >
-            Join house
+            {joining ? <LoadingLabel label="Joining..." /> : "Join house"}
           </button>
+          {joinError && <p className="mt-3 text-sm text-red-600">{joinError}</p>}
         </div>
       </section>
     );
@@ -409,7 +451,7 @@ function Dashboard({
                 </span>
               </div>
 
-              <div className={`mt-5 flex items-center gap-3 rounded-[22px] px-4 py-4 ${statusLabel.className} ${statusLabel.text === "Started" ? "started-live" : ""} ${statusLabel.text === "Stopped" ? "stopped-live" : ""}`}>
+              <div className={`mt-5 flex items-center gap-3 rounded-[22px] px-4 py-4 ${statusLabel.className}`}>
                 <span className="relative grid h-3 w-3 place-items-center">
                   {statusLabel.tone === "running" && (
                     <span className="absolute h-3 w-3 animate-ping rounded-full bg-emerald-400/70" />
@@ -434,13 +476,6 @@ function Dashboard({
                 Last seen: {status.lastSeenAt ? new Date(status.lastSeenAt).toLocaleString() : "-"}
               </p>
             </section>
-
-            {status.startNotConfirmed && (
-              <section className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                START sent but the motor has not started. It may be the starter&apos;s
-                restart delay, a dry run, or no power.
-              </section>
-            )}
 
             {error && (
               <section className="rounded-[22px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -501,7 +536,7 @@ function Dashboard({
                     );
                   })}
                 </div>
-                {timerEndsAt !== null && (
+                {timerEnabled && timerEndsAt !== null && (
                   <div className="mt-4 flex items-center gap-4 rounded-2xl bg-white px-4 py-3 ring-1 ring-zinc-200">
                     <svg viewBox="0 0 56 56" className="h-14 w-14 shrink-0" aria-hidden="true">
                       <circle cx="28" cy="28" r="22" fill="none" stroke="#e4e4e7" strokeWidth="4" />
@@ -523,7 +558,7 @@ function Dashboard({
                         Remaining
                       </p>
                       <p className="text-3xl font-semibold tracking-tight text-zinc-950 tabular-nums">
-                        {formatRemaining(timerRemainingMs)}
+                        {formatRemaining(timerRemainingMs, Number(timerMinutes) * 60)}
                       </p>
                       <p className="text-xs text-zinc-500">until auto STOP</p>
                     </div>
@@ -542,10 +577,7 @@ function Dashboard({
                   disabled={busy !== null}
                   onClick={() => setConfirmCommandType("START")}
                 >
-                  {buttonLabel === "START" && (
-                    <span className="command-sheen pointer-events-none absolute inset-y-0 w-1/3 bg-white/25" />
-                  )}
-                  <PlayIcon />
+                  {buttonLabel !== "START" && <PlayIcon />}
                   {busy === "START" ? "Sending..." : buttonLabel === "START" ? "Started" : "START"}
                 </button>
                 <button
@@ -553,10 +585,7 @@ function Dashboard({
                   disabled={busy !== null}
                   onClick={() => setConfirmCommandType("STOP")}
                 >
-                  {buttonLabel === "STOP" && (
-                    <span className="command-sheen pointer-events-none absolute inset-y-0 w-1/3 bg-white/20" />
-                  )}
-                  <StopIcon />
+                  {buttonLabel !== "STOP" && <StopIcon />}
                   {busy === "STOP" ? "Sending..." : buttonLabel === "STOP" ? "Stopped" : "STOP"}
                 </button>
               </div>
@@ -1107,14 +1136,14 @@ function Dashboard({
               <p className={eyebrow}>Navigate</p>
               <h3 className="mt-1 text-lg font-semibold tracking-tight text-zinc-950">Admin dashboard</h3>
               <p className="mt-1 text-xs text-zinc-500">Select a page to manage the system.</p>
-              <div className="mt-4 grid grid-cols-1 gap-1.5 rounded-[22px] bg-zinc-100 p-1.5">
+              <div className="mt-4 grid grid-cols-1 gap-2">
                 {adminPages.map(([page, label]) => (
                   <button
                     key={page}
                     className={`rounded-2xl px-3 py-2.5 text-left text-sm font-medium transition ${
                       adminPage === page
-                        ? "bg-white text-zinc-950 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-800"
+                        ? "bg-zinc-950 text-white"
+                        : "bg-zinc-50 text-zinc-700 ring-1 ring-zinc-200 hover:bg-zinc-100"
                     }`}
                     onClick={() => {
                       if (page === "manage") {
@@ -1194,10 +1223,10 @@ function Dashboard({
                 onClick={() => setAdminSidebarOpen(false)}
               >
                 <aside
-                  className="absolute left-0 top-0 h-full w-full max-w-sm overflow-y-auto border-r border-zinc-200 bg-white p-5 shadow-2xl"
+                  className="absolute left-0 top-0 flex h-full w-full max-w-sm flex-col border-r border-zinc-200 bg-white shadow-2xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-4 border-b border-zinc-100 bg-white/95 px-5 py-4 backdrop-blur">
+                  <div className="shrink-0 border-b border-zinc-100 bg-white px-5 py-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className={eyebrow}>Admin</p>
@@ -1212,11 +1241,11 @@ function Dashboard({
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-4">
                     {adminPages.map(([page, label]) => (
                       <button
                         key={page}
-                        className={`w-full rounded-2xl px-3 py-3 text-left text-sm font-medium transition ${
+                        className={`block w-full shrink-0 rounded-2xl px-3 py-3 text-left text-sm font-medium transition ${
                           adminPage === page
                             ? "bg-zinc-950 text-white"
                             : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
@@ -1253,8 +1282,45 @@ function Dashboard({
   );
 }
 
-function formatRemaining(ms: number) {
-  const total = Math.max(0, Math.ceil(ms / 1000));
+function friendlyError(err: unknown) {
+  const data = err && typeof err === "object" && "data" in err ? (err as { data?: unknown }).data : undefined;
+  const message = `${err instanceof Error ? err.message : ""} ${typeof data === "string" ? data : ""}`;
+  const text = message.toLowerCase();
+  if (text.includes("invalid house key")) {
+    return "Invalid house key. Ask the admin for the current 6-character key.";
+  }
+  if (text.includes("already belong")) {
+    return "You already belong to a house.";
+  }
+  if (text.includes("wrong name or email") || text.includes("invalidaccountid") || text.includes("invalid account")) {
+    return "Wrong name or email. Please try again.";
+  }
+  if (
+    text.includes("invalid credentials") ||
+    text.includes("invalidsecret") ||
+    text.includes("invalid secret") ||
+    text.includes("invalid password") ||
+    text.includes("wrong password")
+  ) {
+    return "Wrong password. Please try again.";
+  }
+  return "Something went wrong. Please try again.";
+}
+
+function LoadingLabel({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center justify-center gap-2">
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+      {label}
+    </span>
+  );
+}
+
+function formatRemaining(ms: number, maxSeconds?: number) {
+  let total = Math.max(0, Math.floor(ms / 1000));
+  if (maxSeconds !== undefined && Number.isFinite(maxSeconds)) {
+    total = Math.min(total, maxSeconds);
+  }
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
@@ -1313,6 +1379,8 @@ function SignOutButton() {
   const { isAuthenticated } = useConvexAuth();
   const { signOut } = useAuthActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   if (!isAuthenticated) {
     return null;
   }
@@ -1320,14 +1388,19 @@ function SignOutButton() {
     <>
       <button
         className="rounded-xl bg-zinc-950 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-zinc-800"
-        onClick={() => setConfirmOpen(true)}
+        onClick={() => {
+          setLogoutError(null);
+          setConfirmOpen(true);
+        }}
       >
         Logout
       </button>
       {confirmOpen && (
         <div
           className="fixed inset-0 z-50 bg-zinc-950/40 backdrop-blur-[2px]"
-          onClick={() => setConfirmOpen(false)}
+          onClick={() => {
+            if (!signingOut) setConfirmOpen(false);
+          }}
         >
           <div className="grid min-h-full place-items-center p-4">
             <div
@@ -1341,21 +1414,28 @@ function SignOutButton() {
               <p className="mt-1 text-sm text-zinc-500">
                 You will need to sign in again to control the motor.
               </p>
+              {logoutError && <p className="mt-3 text-sm text-red-600">{logoutError}</p>}
               <div className="mt-5 grid grid-cols-2 gap-2">
                 <button
-                  className="rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                  className="rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                  disabled={signingOut}
                   onClick={() => setConfirmOpen(false)}
                 >
                   Cancel
                 </button>
                 <button
-                  className="rounded-2xl bg-zinc-950 px-3 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+                  className="flex items-center justify-center rounded-2xl bg-zinc-950 px-3 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+                  disabled={signingOut}
                   onClick={() => {
-                    setConfirmOpen(false);
-                    void signOut();
+                    setSigningOut(true);
+                    setLogoutError(null);
+                    void signOut().catch((err) => {
+                      setSigningOut(false);
+                      setLogoutError(friendlyError(err));
+                    });
                   }}
                 >
-                  Logout
+                  {signingOut ? <LoadingLabel label="Logging out..." /> : "Logout"}
                 </button>
               </div>
             </div>
@@ -1534,15 +1614,20 @@ function AuthCard() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const resolvedLoginEmail = useQuery((api as any).adminUsers.resolveLoginEmail, {
-    identifier,
-  }) as string | undefined;
+  const [signingIn, setSigningIn] = useState(false);
+  const convex = useConvex();
 
   const submitLogin = async () => {
+    const accountExists = await convex.query(api.adminUsers.loginIdentifierExists, { identifier });
+    if (!accountExists) {
+      throw new Error("Wrong name or email");
+    }
+    const loginEmail = (await convex.query((api as any).adminUsers.resolveLoginEmail, {
+      identifier,
+    })) as string;
     const formData = new FormData();
     formData.set("flow", "signIn");
-    const loginEmail = (resolvedLoginEmail ?? identifier).trim().toLowerCase();
-    formData.set("email", loginEmail);
+    formData.set("email", (loginEmail || identifier).trim().toLowerCase());
     formData.set("password", password);
     await signIn("password", formData);
   };
@@ -1562,9 +1647,12 @@ function AuthCard() {
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
-          void submitLogin().catch((err) => {
-            setError(err instanceof Error ? err.message : "Authentication failed");
-          });
+          setSigningIn(true);
+          void submitLogin()
+            .catch((err) => {
+              setError(friendlyError(err));
+            })
+            .finally(() => setSigningIn(false));
         }}
       >
         <input
@@ -1627,10 +1715,11 @@ function AuthCard() {
         </div>
 
         <button
-          className="w-full rounded-2xl bg-zinc-950 px-3 py-2.5 font-semibold text-white transition hover:bg-zinc-800"
+          className="flex w-full items-center justify-center rounded-2xl bg-zinc-950 px-3 py-2.5 font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
           type="submit"
+          disabled={signingIn}
         >
-          Sign in
+          {signingIn ? <LoadingLabel label="Signing in..." /> : "Sign in"}
         </button>
       </form>
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}

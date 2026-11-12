@@ -75,6 +75,34 @@ export const resolveLoginEmail = query({
   },
 });
 
+export const loginIdentifierExists = query({
+  args: {
+    identifier: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const value = args.identifier.trim().toLowerCase();
+    if (!value) {
+      return false;
+    }
+
+    if (value.includes("@")) {
+      const account = await ctx.db
+        .query("authAccounts")
+        .withIndex("providerAndAccountId", (q) =>
+          q.eq("provider", "password").eq("providerAccountId", value),
+        )
+        .first();
+      return account !== null;
+    }
+
+    const users = await ctx.db.query("users").take(200);
+    return users.some(
+      (user) => user.name?.trim().toLowerCase() === value && !!user.email,
+    );
+  },
+});
+
 export const bootstrapAdmin = action({
   args: {
     email: v.optional(v.string()),

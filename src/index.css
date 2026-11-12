@@ -44,41 +44,7 @@ textarea {
   }
 }
 
-@keyframes started-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55);
-  }
-  100% {
-    box-shadow: 0 0 0 16px rgba(16, 185, 129, 0);
-  }
-}
-
-@keyframes stopped-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.5);
-  }
-  100% {
-    box-shadow: 0 0 0 16px rgba(244, 63, 94, 0);
-  }
-}
-
-@keyframes command-sheen {
-  0% {
-    transform: translateX(-140%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
-}
-
-.started-live {
-  animation: command-pop 0.45s ease-out, started-ring 1.3s ease-out infinite;
-}
-
+.started-live,
 .stopped-live {
-  animation: command-pop 0.45s ease-out, stopped-ring 1.3s ease-out infinite;
-}
-
-.command-sheen {
-  animation: command-sheen 1.6s ease-in-out infinite;
+  animation: command-pop 0.35s ease-out;
 }

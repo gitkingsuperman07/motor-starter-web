@@ -216,16 +216,11 @@ export const status = query({
       now - deviceState.lastSeenAt < ONLINE_WINDOW_MS;
     const readingFresh = now - deviceState.lastReadingAt < ONLINE_WINDOW_MS;
 
-    const startAckedNotRunning = commands.find(
-      (command) =>
-        command.type === "START" &&
-        command.status === "acked" &&
-        command.ackedAt !== undefined,
-    );
-
     const startNotConfirmed =
-      !!startAckedNotRunning &&
-      now - (startAckedNotRunning.ackedAt ?? now) > 20_000 &&
+      lastCommand?.type === "START" &&
+      lastCommand.status === "acked" &&
+      lastCommand.ackedAt !== undefined &&
+      now - lastCommand.ackedAt > 20_000 &&
       !deviceState.running;
 
     let activityMessage = "No activity yet";
