@@ -6,10 +6,79 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   color: #18181b;
   background: #f4f4f5;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+@keyframes command-pop {
+  0% {
+    transform: scale(0.92);
+  }
+  45% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes started-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 16px rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes stopped-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 16px rgba(244, 63, 94, 0);
+  }
+}
+
+@keyframes command-sheen {
+  0% {
+    transform: translateX(-140%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.started-live {
+  animation: command-pop 0.45s ease-out, started-ring 1.3s ease-out infinite;
+}
+
+.stopped-live {
+  animation: command-pop 0.45s ease-out, stopped-ring 1.3s ease-out infinite;
+}
+
+.command-sheen {
+  animation: command-sheen 1.6s ease-in-out infinite;
 }

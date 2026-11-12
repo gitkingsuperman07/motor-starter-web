@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const surface =
   "rounded-[28px] border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_18px_40px_-24px_rgba(24,24,27,0.16)]";
 const field =
-  "w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-900 focus:bg-white focus:ring-4 focus:ring-zinc-100";
+  "w-full max-w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-base text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-900 focus:bg-white focus:ring-4 focus:ring-zinc-100";
 const eyebrow = "text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400";
 const timerPresets = ["1", "5", "10", "15", "30", "60"] as const;
 
@@ -25,10 +25,10 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#f4f4f5] text-zinc-950">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4f5] text-zinc-950">
       <header className="sticky top-0 z-20 border-b border-zinc-200/80 bg-white/80 backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between px-3 py-3 sm:px-4 lg:px-6">
-          <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-2 px-3 py-3 sm:px-4 lg:px-6">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <Authenticated>
               {me?.isAdmin && (
                 <button
@@ -54,11 +54,11 @@ export default function App() {
                 </button>
               )}
             </Authenticated>
-            <div className="rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-sm">
-              <img src="/motor-logo.svg" alt="Motor Starter logo" className="h-8 w-8" />
+            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-black p-0.5 shadow-sm">
+              <img src="/motor-logo.png" alt="Motor Starter logo" className="h-8 w-8 rounded-xl object-cover" />
             </div>
-            <div className="leading-tight">
-              <h1 className="text-sm font-semibold tracking-tight text-zinc-950 sm:text-base">
+            <div className="min-w-0 leading-tight">
+              <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-950 sm:text-base">
                 Smart Motor Starter
               </h1>
               <p className="hidden text-[11px] font-medium text-zinc-400 sm:block">
@@ -81,7 +81,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1400px] px-3 pb-8 pt-4 sm:px-4 sm:pb-10 sm:pt-5 lg:px-6">
+      <main className="mx-auto w-full min-w-0 max-w-[1400px] px-3 pb-8 pt-4 sm:px-4 sm:pb-10 sm:pt-5 lg:px-6">
         <Authenticated>
           <Dashboard
             adminSidebarOpen={adminSidebarOpen}
@@ -129,6 +129,8 @@ function Dashboard({
   const [timerEndsAt, setTimerEndsAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const autoStopTimerRef = useRef<number | null>(null);
+  const buttonLabelTimerRef = useRef<number | null>(null);
+  const [buttonLabel, setButtonLabel] = useState<"START" | "STOP" | null>(null);
   const [houseName, setHouseName] = useState("");
   const [joinKey, setJoinKey] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("");
@@ -146,6 +148,7 @@ function Dashboard({
   const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [showManagedPassword, setShowManagedPassword] = useState(false);
+  const [motorState, setMotorState] = useState<"START" | "STOP" | null>(null);
 
   useEffect(() => {
     if (!status?.house || document.visibilityState !== "visible") {
@@ -178,8 +181,22 @@ function Dashboard({
       if (autoStopTimerRef.current !== null) {
         window.clearTimeout(autoStopTimerRef.current);
       }
+      if (buttonLabelTimerRef.current !== null) {
+        window.clearTimeout(buttonLabelTimerRef.current);
+      }
     };
   }, []);
+
+  const showButtonResult = (type: "START" | "STOP") => {
+    if (buttonLabelTimerRef.current !== null) {
+      window.clearTimeout(buttonLabelTimerRef.current);
+    }
+    setButtonLabel(type);
+    buttonLabelTimerRef.current = window.setTimeout(() => {
+      setButtonLabel(null);
+      buttonLabelTimerRef.current = null;
+    }, 10_000);
+  };
 
   useEffect(() => {
     if (timerEndsAt === null) {
@@ -189,12 +206,34 @@ function Dashboard({
     return () => window.clearInterval(tick);
   }, [timerEndsAt]);
 
+  useEffect(() => {
+    if (motorState && status?.lastCommand?.type === motorState) {
+      setMotorState(null);
+    }
+  }, [motorState, status?.lastCommand?.type]);
+
+  const commanded = motorState ?? status?.lastCommand?.type ?? null;
+
   const statusLabel = useMemo(() => {
     if (!status || !status.house) {
       return {
         text: "Waiting for house setup",
         tone: "idle" as const,
         className: "bg-zinc-100 text-zinc-700",
+      };
+    }
+    if (commanded === "START") {
+      return {
+        text: "Started",
+        tone: "running" as const,
+        className: "bg-emerald-50 text-emerald-700",
+      };
+    }
+    if (commanded === "STOP") {
+      return {
+        text: "Stopped",
+        tone: "stopped" as const,
+        className: "bg-zinc-100 text-zinc-800",
       };
     }
     if (!status.online) {
@@ -206,7 +245,7 @@ function Dashboard({
     }
     if (status.readingFresh && status.running) {
       return {
-        text: `Running (${status.amps.toFixed(1)} A)`,
+        text: "Started",
         tone: "running" as const,
         className: "bg-emerald-50 text-emerald-700",
       };
@@ -216,13 +255,15 @@ function Dashboard({
       tone: "stopped" as const,
       className: "bg-zinc-100 text-zinc-800",
     };
-  }, [status]);
+  }, [commanded, status]);
 
   const submitCommand = async (type: "START" | "STOP") => {
     setError(null);
     setBusy(type);
     try {
       await sendCommand({ type });
+      setMotorState(type);
+      showButtonResult(type);
 
       if (type === "STOP") {
         if (autoStopTimerRef.current !== null) {
@@ -243,7 +284,11 @@ function Dashboard({
           setTimerEndsAt(endsAt);
           autoStopTimerRef.current = window.setTimeout(() => {
             void sendCommand({ type: "STOP" })
-              .then(() => setTimerNotice("Timer ended. STOP command sent."))
+              .then(() => {
+                setMotorState("STOP");
+                showButtonResult("STOP");
+                setTimerNotice("Timer ended. STOP command sent.");
+              })
               .catch(() => setTimerNotice("Timer ended, but STOP command failed."));
             autoStopTimerRef.current = null;
             setTimerEndsAt(null);
@@ -336,8 +381,8 @@ function Dashboard({
   };
 
   return (
-    <div className="grid gap-4 sm:gap-5 xl:grid-cols-[2fr_1fr]">
-      <div className="space-y-5">
+    <div className="grid min-w-0 gap-4 sm:gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="min-w-0 space-y-5">
         {showHousesPage && (
           <>
             <section className={`${surface} overflow-hidden p-5 sm:p-6`}>
@@ -356,7 +401,7 @@ function Dashboard({
                         Back
                       </button>
                     )}
-                    <h2 className="text-2xl font-semibold tracking-tight text-zinc-950">{me.house.name}</h2>
+                    <h2 className="min-w-0 break-words text-2xl font-semibold tracking-tight text-zinc-950">{me.house.name}</h2>
                   </div>
                 </div>
                 <span className="rounded-full bg-zinc-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
@@ -364,7 +409,7 @@ function Dashboard({
                 </span>
               </div>
 
-              <div className={`mt-5 flex items-center gap-3 rounded-[22px] px-4 py-4 ${statusLabel.className}`}>
+              <div className={`mt-5 flex items-center gap-3 rounded-[22px] px-4 py-4 ${statusLabel.className} ${statusLabel.text === "Started" ? "started-live" : ""} ${statusLabel.text === "Stopped" ? "stopped-live" : ""}`}>
                 <span className="relative grid h-3 w-3 place-items-center">
                   {statusLabel.tone === "running" && (
                     <span className="absolute h-3 w-3 animate-ping rounded-full bg-emerald-400/70" />
@@ -491,22 +536,28 @@ function Dashboard({
                 )}
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
                 <button
-                  className="flex h-[88px] items-center justify-center gap-3 rounded-[22px] bg-emerald-600 text-lg font-semibold tracking-wide text-white shadow-[0_12px_24px_-16px_rgba(5,150,105,0.9)] transition hover:bg-emerald-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-emerald-300"
+                  className={`relative flex min-h-16 items-center justify-center gap-3 overflow-hidden rounded-[22px] bg-emerald-600 px-4 py-4 text-base font-semibold tracking-wide text-white shadow-[0_12px_24px_-16px_rgba(5,150,105,0.9)] transition hover:bg-emerald-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-emerald-300 sm:h-[88px] sm:text-lg ${buttonLabel === "START" ? "started-live" : ""}`}
                   disabled={busy !== null}
                   onClick={() => setConfirmCommandType("START")}
                 >
+                  {buttonLabel === "START" && (
+                    <span className="command-sheen pointer-events-none absolute inset-y-0 w-1/3 bg-white/25" />
+                  )}
                   <PlayIcon />
-                  {busy === "START" ? "Sending..." : "START"}
+                  {busy === "START" ? "Sending..." : buttonLabel === "START" ? "Started" : "START"}
                 </button>
                 <button
-                  className="flex h-[88px] items-center justify-center gap-3 rounded-[22px] bg-rose-600 text-lg font-semibold tracking-wide text-white shadow-[0_12px_24px_-16px_rgba(225,29,72,0.9)] transition hover:bg-rose-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-rose-300"
+                  className={`relative flex min-h-16 items-center justify-center gap-3 overflow-hidden rounded-[22px] bg-rose-600 px-4 py-4 text-base font-semibold tracking-wide text-white shadow-[0_12px_24px_-16px_rgba(225,29,72,0.9)] transition hover:bg-rose-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-rose-300 sm:h-[88px] sm:text-lg ${buttonLabel === "STOP" ? "stopped-live" : ""}`}
                   disabled={busy !== null}
                   onClick={() => setConfirmCommandType("STOP")}
                 >
+                  {buttonLabel === "STOP" && (
+                    <span className="command-sheen pointer-events-none absolute inset-y-0 w-1/3 bg-white/20" />
+                  )}
                   <StopIcon />
-                  {busy === "STOP" ? "Sending..." : "STOP"}
+                  {busy === "STOP" ? "Sending..." : buttonLabel === "STOP" ? "Stopped" : "STOP"}
                 </button>
               </div>
             </section>
@@ -587,15 +638,21 @@ function Dashboard({
                         </span>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-zinc-950">
-                            {command.type} · {command.actorName}
+                            {command.type === "START" ? "started by" : "stopped by"} {command.actorName}
                           </p>
                           <p className="text-xs text-zinc-400">
                             {new Date(command.createdAt).toLocaleString()}
                           </p>
                         </div>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${commandTone(command.status)}`}>
-                        {mapState(command.status)}
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold lowercase tracking-wide ${
+                          command.type === "START"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-rose-100 text-rose-700"
+                        }`}
+                      >
+                        {command.type === "START" ? "motor started" : "motor stopped"}
                       </span>
                     </li>
                   ))}
@@ -611,7 +668,7 @@ function Dashboard({
             <h3 className="mt-1 text-lg font-semibold tracking-tight text-zinc-950">Overview</h3>
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MetricTile label="Connection" value={status.online ? "Online" : "Offline"} live={status.online} />
-              <MetricTile label="Motor" value={status.running ? "Running" : "Stopped"} live={status.running} />
+              <MetricTile label="Motor" value={commanded === "START" ? "Started" : "Stopped"} live={commanded === "START"} />
             </div>
             <p className="mt-4 rounded-[22px] bg-zinc-50 px-4 py-3 text-sm text-zinc-600">{status.activityMessage}</p>
           </section>
@@ -1043,7 +1100,7 @@ function Dashboard({
         )}
       </div>
 
-      <aside className="space-y-4 sm:space-y-5">
+      <aside className="min-w-0 space-y-4 sm:space-y-5">
         {isAdmin ? (
           <>
             <section className={`${surface} p-5`}>
@@ -1187,27 +1244,13 @@ function Dashboard({
             <h3 className="mt-1 text-lg font-semibold tracking-tight text-zinc-950">Overview</h3>
             <div className="mt-4 grid grid-cols-1 gap-3">
               <MetricTile label="Connection" value={status.online ? "Online" : "Offline"} live={status.online} />
-              <MetricTile label="Motor" value={status.running ? "Running" : "Stopped"} live={status.running} />
+              <MetricTile label="Motor" value={commanded === "START" ? "Started" : "Stopped"} live={commanded === "START"} />
             </div>
           </section>
         )}
       </aside>
     </div>
   );
-}
-
-function mapState(status: "pending" | "sent" | "acked" | "expired") {
-  if (status === "acked") {
-    return "confirmed";
-  }
-  return status;
-}
-
-function commandTone(status: "pending" | "sent" | "acked" | "expired") {
-  if (status === "acked") return "bg-emerald-100 text-emerald-700";
-  if (status === "sent") return "bg-sky-100 text-sky-700";
-  if (status === "pending") return "bg-amber-100 text-amber-800";
-  return "bg-zinc-200 text-zinc-600";
 }
 
 function formatRemaining(ms: number) {
@@ -1507,8 +1550,8 @@ function AuthCard() {
   return (
     <div className={`${surface} mx-auto w-full max-w-md p-6 sm:p-7`}>
       <div className="mb-6 text-center">
-        <div className="mx-auto mb-3 w-fit rounded-2xl border border-zinc-200 bg-white p-2">
-          <img src="/motor-logo.svg" alt="" className="h-10 w-10" />
+        <div className="mx-auto mb-3 w-fit overflow-hidden rounded-2xl border border-zinc-200 bg-black p-1">
+          <img src="/motor-logo.png" alt="" className="h-10 w-10 rounded-xl object-cover" />
         </div>
         <h2 className="text-xl font-semibold tracking-tight text-zinc-950">Sign in</h2>
         <p className="mt-1 text-sm text-zinc-500">Control the motor for your house.</p>
