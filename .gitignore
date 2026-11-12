@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local AI assistant metadata
+.agents/
+.claude/
+.cursor/
