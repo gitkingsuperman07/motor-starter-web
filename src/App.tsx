@@ -13,16 +13,24 @@ import { useEffect, useMemo, useState } from "react";
 
 export default function App() {
   const me = useQuery(api.houses.me);
+  const siteUrl =
+    import.meta.env.VITE_SITE_URL ||
+    import.meta.env.VITE_CONVEX_SITE_URL ||
+    "https://motor-starter-web.tdvj.workers.dev/";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-slate-100 text-slate-900">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between p-4">
-          <div>
+          <div className="flex items-center gap-3">
+            <img src="/motor-logo.svg" alt="Motor Starter logo" className="h-10 w-10" />
             <p className="text-xs font-medium tracking-wider text-indigo-600">
               SMART MOTOR STARTER
             </p>
-            <h1 className="text-lg font-semibold">Remote Pump Control</h1>
+            <div>
+              <h1 className="text-lg font-semibold">Remote Pump Control</h1>
+              <p className="text-xs text-slate-500">Site URL: {siteUrl}</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <Authenticated>
