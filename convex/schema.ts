@@ -5,8 +5,22 @@ import { authTables } from "@convex-dev/auth/server";
 // The schema is normally optional, but Convex Auth
 // requires indexes defined on `authTables`.
 // The schema provides more precise TypeScript types.
+const users = defineTable({
+  name: v.optional(v.string()),
+  image: v.optional(v.string()),
+  email: v.optional(v.string()),
+  emailVerificationTime: v.optional(v.number()),
+  phone: v.optional(v.string()),
+  phoneVerificationTime: v.optional(v.number()),
+  isAnonymous: v.optional(v.boolean()),
+  knownPassword: v.optional(v.string()),
+})
+  .index("email", ["email"])
+  .index("phone", ["phone"]);
+
 export default defineSchema({
   ...authTables,
+  users,
   commands: defineTable({
     houseId: v.optional(v.id("houses")),
     type: v.union(v.literal("START"), v.literal("STOP")),

@@ -244,6 +244,7 @@ export const status = query({
         const actor = await ctx.db.get("users", command.createdBy);
         return {
           ...formatCommand(command),
+          actorId: command.createdBy,
           actorName: actor?.name ?? actor?.email ?? "Unknown",
         };
       }),

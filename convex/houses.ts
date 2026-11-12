@@ -104,6 +104,58 @@ export const me = query({
   },
 });
 
+export const listOwnedHouses = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
+    const membership = await getMembership(ctx, userId);
+    const houses = await ctx.db
+      .query("houses")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .order("desc")
+      .take(50);
+
+    return houses.map((house) => ({
+      id: house._id,
+      name: house.name,
+      createdAt: house.createdAt,
+      selected: membership?.houseId === house._id,
+    }));
+  },
+});
+
+export const selectHouse = mutation({
+  args: {
+    houseId: v.id("houses"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
+    const house = await ctx.db.get("houses", args.houseId);
+    if (!house || house.ownerId !== userId) {
+      throw new ConvexError("House not found");
+    }
+
+    const membership = await getMembership(ctx, userId);
+    if (membership) {
+      await ctx.db.patch("houseMembers", membership._id, {
+        houseId: args.houseId,
+        role: "owner",
+      });
+    } else {
+      await ctx.db.insert("houseMembers", {
+        houseId: args.houseId,
+        userId,
+        role: "owner",
+        createdAt: Date.now(),
+      });
+    }
+
+    return { ok: true };
+  },
+});
+
 export const createHouse = mutation({
   args: {
     name: v.string(),

@@ -4,8 +4,9 @@ import {
   getAuthUserId,
   modifyAccountCredentials,
 } from "@convex-dev/auth/server";
-import { action, mutation, query } from "./_generated/server";
-import { api } from "./_generated/api";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 
 function readEnv(name: string) {
   const processEnv = (
@@ -132,6 +133,7 @@ export const listUsers = query({
           email: user.email ?? account?.providerAccountId ?? "",
           phone: user.phone ?? "",
           hasPassword: !!account,
+          knownPassword: user.knownPassword ?? "",
           createdAt: user._creationTime,
         };
       })
@@ -168,7 +170,113 @@ export const createUser = action({
       shouldLinkViaPhone: false,
     });
 
+    await ctx.runMutation(internal.adminUsers.saveKnownPassword, {
+      userId: user._id,
+      password: args.password,
+    });
+
     return { userId: user._id };
+  },
+});
+
+export const ownAccount = internalQuery({
+  args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      userId: v.id("users"),
+      email: v.string(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return null;
+    }
+
+    const user = await ctx.db.get("users", userId);
+    const account = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) =>
+        q.eq("userId", userId).eq("provider", "password"),
+      )
+      .first();
+    const email = user?.email ?? account?.providerAccountId ?? "";
+    if (!email) {
+      return null;
+    }
+
+    return { userId, email };
+  },
+});
+
+export const saveKnownPassword = internalMutation({
+  args: {
+    userId: v.id("users"),
+    password: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const password = args.password.trim();
+    if (!password) {
+      throw new ConvexError("Password is required");
+    }
+    await ctx.db.patch("users", args.userId, { knownPassword: password });
+    return null;
+  },
+});
+
+export const updateOwnName = mutation({
+  args: {
+    name: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new ConvexError("Not authenticated");
+    }
+    const name = args.name.trim();
+    if (!name) {
+      throw new ConvexError("Name is required");
+    }
+    await ctx.db.patch("users", userId, { name });
+    return null;
+  },
+});
+
+export const resetOwnPassword = action({
+  args: {
+    newPassword: v.string(),
+  },
+  returns: v.object({ ok: v.boolean() }),
+  handler: async (ctx, args) => {
+    const password = args.newPassword.trim();
+    if (!password) {
+      throw new ConvexError("Password is required");
+    }
+
+    const account: { userId: Id<"users">; email: string } | null = await ctx.runQuery(
+      internal.adminUsers.ownAccount,
+      {},
+    );
+    if (!account) {
+      throw new ConvexError("Not authenticated");
+    }
+
+    await modifyAccountCredentials(ctx, {
+      provider: "password",
+      account: {
+        id: account.email,
+        secret: password,
+      },
+    });
+    await ctx.runMutation(internal.adminUsers.saveKnownPassword, {
+      userId: account.userId,
+      password,
+    });
+
+    return { ok: true };
   },
 });
 
@@ -257,6 +365,10 @@ export const updateUser = action({
           id: updateResult.accountEmail,
           secret: args.newPassword,
         },
+      });
+      await ctx.runMutation(internal.adminUsers.saveKnownPassword, {
+        userId: args.userId,
+        password: args.newPassword,
       });
     }
 
