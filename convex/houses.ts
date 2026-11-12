@@ -2,7 +2,23 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
-const KEY_TTL_MS = 24 * 60 * 60 * 1000;
+const NEVER_EXPIRES_AT = 253402300799000;
+
+function readEnv(name: string) {
+  const processEnv = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process?.env;
+  return processEnv?.[name];
+}
+
+async function requireAdminUser(ctx: any, userId: any) {
+  const user = await ctx.db.get("users", userId);
+  const adminEmail = readEnv("ADMIN_EMAIL")?.trim().toLowerCase();
+  const userEmail = user?.email?.trim().toLowerCase();
+  if (!adminEmail || !userEmail || userEmail !== adminEmail) {
+    throw new ConvexError("Only admin can perform this action");
+  }
+}
 
 async function requireUserId(ctx: Parameters<typeof getAuthUserId>[0]) {
   const userId = await getAuthUserId(ctx);
@@ -35,6 +51,7 @@ export const me = query({
           phone: null,
           email: null,
         },
+        isAdmin: false,
         membership: null,
         house: null,
         houseKeys: [],
@@ -52,6 +69,9 @@ export const me = query({
           .order("desc")
           .take(10)
       : [];
+    const adminEmail = readEnv("ADMIN_EMAIL")?.trim().toLowerCase();
+    const isAdmin =
+      !!adminEmail && user?.email?.trim().toLowerCase() === adminEmail;
 
     return {
       user: {
@@ -60,6 +80,7 @@ export const me = query({
         phone: user?.phone ?? null,
         email: user?.email ?? null,
       },
+      isAdmin,
       membership: membership
         ? {
             houseId: membership.houseId,
@@ -89,10 +110,8 @@ export const createHouse = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
     const existingMembership = await getMembership(ctx, userId);
-    if (existingMembership) {
-      throw new ConvexError("You already belong to a house");
-    }
 
     const now = Date.now();
     const houseId = await ctx.db.insert("houses", {
@@ -101,12 +120,19 @@ export const createHouse = mutation({
       createdAt: now,
     });
 
-    await ctx.db.insert("houseMembers", {
-      houseId,
-      userId,
-      role: "owner",
-      createdAt: now,
-    });
+    if (existingMembership) {
+      await ctx.db.patch("houseMembers", existingMembership._id, {
+        houseId,
+        role: "owner",
+      });
+    } else {
+      await ctx.db.insert("houseMembers", {
+        houseId,
+        userId,
+        role: "owner",
+        createdAt: now,
+      });
+    }
 
     return { houseId };
   },
@@ -131,8 +157,8 @@ export const joinHouseWithKey = mutation({
       .withIndex("by_key", (q) => q.eq("key", normalizedKey))
       .first();
 
-    if (!invite || invite.expiresAt < now) {
-      throw new ConvexError("Invalid or expired house key");
+    if (!invite) {
+      throw new ConvexError("Invalid house key");
     }
 
     const alreadyInHouse = await ctx.db
@@ -161,23 +187,32 @@ export const createHouseKey = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
     const membership = await getMembership(ctx, userId);
     if (!membership || membership.role !== "owner") {
-      throw new ConvexError("Only the house owner can create keys");
+      throw new ConvexError("Admin must be the house owner");
     }
 
     const now = Date.now();
+    const existingKeys = await ctx.db
+      .query("houseKeys")
+      .withIndex("by_house", (q) => q.eq("houseId", membership.houseId))
+      .collect();
+    for (const item of existingKeys) {
+      await ctx.db.delete("houseKeys", item._id);
+    }
+
     const key = generateHouseKey();
     const id = await ctx.db.insert("houseKeys", {
       houseId: membership.houseId,
       key,
       label: args.label?.trim() || undefined,
-      expiresAt: now + KEY_TTL_MS,
+      expiresAt: NEVER_EXPIRES_AT,
       createdAt: now,
       createdBy: userId,
     });
 
-    return { id, key, expiresAt: now + KEY_TTL_MS };
+    return { id, key, expiresAt: NEVER_EXPIRES_AT };
   },
 });
 
@@ -189,9 +224,10 @@ export const updateHouseKey = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
     const membership = await getMembership(ctx, userId);
     if (!membership || membership.role !== "owner") {
-      throw new ConvexError("Only the house owner can edit keys");
+      throw new ConvexError("Admin must be the house owner");
     }
 
     const target = await ctx.db.get("houseKeys", args.id);
@@ -199,10 +235,28 @@ export const updateHouseKey = mutation({
       throw new ConvexError("Key not found");
     }
 
+    if (args.regenerate) {
+      const existingKeys = await ctx.db
+        .query("houseKeys")
+        .withIndex("by_house", (q) => q.eq("houseId", membership.houseId))
+        .collect();
+      for (const item of existingKeys) {
+        await ctx.db.delete("houseKeys", item._id);
+      }
+      await ctx.db.insert("houseKeys", {
+        houseId: membership.houseId,
+        key: generateHouseKey(),
+        label: args.label?.trim() || target.label,
+        expiresAt: NEVER_EXPIRES_AT,
+        createdAt: Date.now(),
+        createdBy: userId,
+      });
+      return { ok: true };
+    }
+
     await ctx.db.patch("houseKeys", args.id, {
       label: args.label?.trim() || undefined,
-      key: args.regenerate ? generateHouseKey() : target.key,
-      expiresAt: Date.now() + KEY_TTL_MS,
+      expiresAt: NEVER_EXPIRES_AT,
     });
 
     return { ok: true };
@@ -215,9 +269,10 @@ export const deleteHouseKey = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
     const membership = await getMembership(ctx, userId);
     if (!membership || membership.role !== "owner") {
-      throw new ConvexError("Only the house owner can delete keys");
+      throw new ConvexError("Admin must be the house owner");
     }
 
     const target = await ctx.db.get("houseKeys", args.id);
@@ -226,6 +281,71 @@ export const deleteHouseKey = mutation({
     }
 
     await ctx.db.delete("houseKeys", args.id);
+    return { ok: true };
+  },
+});
+
+export const renameCurrentHouse = mutation({
+  args: {
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
+    const membership = await getMembership(ctx, userId);
+    if (!membership || membership.role !== "owner") {
+      throw new ConvexError("Admin must be the house owner");
+    }
+
+    await ctx.db.patch("houses", membership.houseId, {
+      name: args.name.trim(),
+    });
+    return { ok: true };
+  },
+});
+
+export const deleteCurrentHouse = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUserId(ctx);
+    await requireAdminUser(ctx, userId);
+    const membership = await getMembership(ctx, userId);
+    if (!membership || membership.role !== "owner") {
+      throw new ConvexError("Admin must be the house owner");
+    }
+
+    const houseId = membership.houseId;
+
+    const keys = await ctx.db
+      .query("houseKeys")
+      .withIndex("by_house", (q) => q.eq("houseId", houseId))
+      .collect();
+    for (const key of keys) {
+      await ctx.db.delete("houseKeys", key._id);
+    }
+
+    const members = await ctx.db
+      .query("houseMembers")
+      .withIndex("by_house", (q) => q.eq("houseId", houseId))
+      .collect();
+    for (const member of members) {
+      await ctx.db.delete("houseMembers", member._id);
+    }
+
+    const commands = await ctx.db
+      .query("commands")
+      .withIndex("by_house_createdAt", (q) => q.eq("houseId", houseId))
+      .collect();
+    for (const command of commands) {
+      await ctx.db.delete("commands", command._id);
+    }
+
+    const deviceState = await ctx.db.query("deviceState").first();
+    if (deviceState && deviceState.houseId === houseId) {
+      await ctx.db.patch("deviceState", deviceState._id, { houseId: undefined });
+    }
+
+    await ctx.db.delete("houses", houseId);
     return { ok: true };
   },
 });

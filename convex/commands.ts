@@ -96,15 +96,6 @@ export const sendCommand = mutation({
 
     const now = Date.now();
     const deviceState = await ensureDeviceState(ctx);
-    if (deviceState.houseId && deviceState.houseId !== membership.houseId) {
-      throw new ConvexError("This board is linked to a different house");
-    }
-
-    const online = now - deviceState.lastSeenAt < ONLINE_WINDOW_MS;
-
-    if (args.type === "START" && !online) {
-      throw new ConvexError("Board is offline, START is blocked");
-    }
 
     if (args.type === "STOP") {
       const pendingStarts = await ctx.db
@@ -153,7 +144,6 @@ export const sendCommand = mutation({
 
     await ctx.db.patch("deviceState", deviceState._id, {
       fastUntil: now + FAST_WINDOW_MS,
-      houseId: membership.houseId,
     });
 
     const inserted = await ctx.db.get("commands", id);
@@ -173,7 +163,6 @@ export const heartbeat = mutation({
     const deviceState = await ensureDeviceState(ctx);
     await ctx.db.patch("deviceState", deviceState._id, {
       fastUntil: now + FAST_WINDOW_MS,
-      houseId: membership.houseId,
     });
     return { ok: true };
   },
@@ -224,8 +213,7 @@ export const status = query({
 
     const lastCommand = commands[0] ?? null;
     const online =
-      now - deviceState.lastSeenAt < ONLINE_WINDOW_MS &&
-      (!deviceState.houseId || deviceState.houseId === membership.houseId);
+      now - deviceState.lastSeenAt < ONLINE_WINDOW_MS;
     const readingFresh = now - deviceState.lastReadingAt < ONLINE_WINDOW_MS;
 
     const startAckedNotRunning = commands.find(
@@ -362,20 +350,11 @@ export const devicePoll = internalMutation({
       .query("commands")
       .withIndex("by_status", (q) => q.eq("status", "pending"))
       .collect())
-      .filter(
-        (command) =>
-          command.expiresAt > now &&
-          (!deviceState.houseId || command.houseId === deviceState.houseId),
-      )
+      .filter((command) => command.expiresAt > now)
       .sort((a, b) => a.createdAt - b.createdAt);
 
     const nextCommand = validPending[0] ?? null;
     if (nextCommand) {
-      if (!deviceState.houseId && nextCommand.houseId) {
-        await ctx.db.patch("deviceState", deviceState._id, {
-          houseId: nextCommand.houseId,
-        });
-      }
       await ctx.db.patch("commands", nextCommand._id, {
         status: "sent",
         sentAt: now,

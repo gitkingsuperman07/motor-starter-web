@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as adminUsers from "../adminUsers.js";
 import type * as auth from "../auth.js";
 import type * as commands from "../commands.js";
 import type * as houses from "../houses.js";
@@ -21,6 +22,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  adminUsers: typeof adminUsers;
   auth: typeof auth;
   commands: typeof commands;
   houses: typeof houses;
