@@ -131,8 +131,10 @@ function Dashboard({
   const [now, setNow] = useState(() => Date.now());
   const autoStopTimerRef = useRef<number | null>(null);
   const buttonLabelTimerRef = useRef<number | null>(null);
+  const seenStopIdRef = useRef<string | null>(null);
   const scheduledMinutesRef = useRef<string | null>(null);
   const [buttonLabel, setButtonLabel] = useState<"START" | "STOP" | null>(null);
+  const [stoppedFlashUntil, setStoppedFlashUntil] = useState(0);
   const [houseName, setHouseName] = useState("");
   const [joinKey, setJoinKey] = useState("");
   const [joining, setJoining] = useState(false);
@@ -197,9 +199,10 @@ function Dashboard({
     }
     setButtonLabel(type);
     buttonLabelTimerRef.current = window.setTimeout(() => {
+      setNow(Date.now());
       setButtonLabel(null);
       buttonLabelTimerRef.current = null;
-    }, 10_000);
+    }, type === "START" ? 20_000 : 10_000);
   };
 
   useEffect(() => {
@@ -209,14 +212,40 @@ function Dashboard({
   }, [motorState, status?.lastCommand?.type]);
 
   const commanded = motorState ?? status?.lastCommand?.type ?? null;
+  const startedUntil =
+    status?.lastCommand?.type === "START" ? status.lastCommand.createdAt + 20_000 : 0;
+  const showStarted = buttonLabel === "START" || now < startedUntil;
+  const showStopped = buttonLabel === "STOP" || now < stoppedFlashUntil;
+  const startedByName =
+    status?.recentCommands?.[0]?.type === "START" ? status.recentCommands[0].actorName : "someone";
 
   useEffect(() => {
-    if (timerEndsAt === null) {
+    const command = status?.lastCommand;
+    if (!command || command.type !== "STOP" || seenStopIdRef.current === command.id) {
+      return;
+    }
+    const firstLoad = seenStopIdRef.current === null;
+    seenStopIdRef.current = command.id;
+    const remaining = Math.max(0, command.createdAt + 10_000 - Date.now());
+    if (firstLoad && remaining === 0) {
+      return;
+    }
+    setNow(Date.now());
+    setStoppedFlashUntil(Date.now() + (firstLoad ? remaining : 10_000));
+  }, [status?.lastCommand]);
+
+  useEffect(() => {
+    if (
+      timerEndsAt === null &&
+      buttonLabel === null &&
+      startedUntil <= Date.now() &&
+      stoppedFlashUntil <= Date.now()
+    ) {
       return;
     }
     const tick = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(tick);
-  }, [timerEndsAt]);
+  }, [timerEndsAt, buttonLabel, startedUntil, stoppedFlashUntil]);
 
   useEffect(() => {
     const clearCountdown = () => {
@@ -471,10 +500,15 @@ function Dashboard({
                   <p className="text-base font-semibold tracking-tight">{statusLabel.text}</p>
                 </div>
               </div>
-              <p className="mt-4 text-sm text-zinc-600">{status.activityMessage}</p>
-              <p className="mt-1 text-xs text-zinc-400">
-                Last seen: {status.lastSeenAt ? new Date(status.lastSeenAt).toLocaleString() : "-"}
-              </p>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-semibold tracking-tight text-zinc-900">{status.activityMessage}</p>
+                <p className="inline-flex w-fit items-center gap-2 rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-600">
+                  <span className="uppercase tracking-[0.12em] text-zinc-400">Last seen</span>
+                  <span className="text-zinc-800">
+                    {status.lastSeenAt ? formatWhen(status.lastSeenAt) : "—"}
+                  </span>
+                </p>
+              </div>
             </section>
 
             {error && (
@@ -573,20 +607,28 @@ function Dashboard({
 
               <div className="mt-4 grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
                 <button
-                  className={`relative flex min-h-16 items-center justify-center gap-3 overflow-hidden rounded-[22px] bg-emerald-600 px-4 py-4 text-base font-semibold tracking-wide text-white shadow-[0_12px_24px_-16px_rgba(5,150,105,0.9)] transition hover:bg-emerald-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-emerald-300 sm:h-[88px] sm:text-lg ${buttonLabel === "START" ? "started-live" : ""}`}
-                  disabled={busy !== null}
+                  className={`relative flex min-h-16 items-center justify-center gap-3 overflow-hidden rounded-[22px] px-4 py-4 text-base font-semibold tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed sm:h-[88px] sm:text-lg ${
+                    showStarted
+                      ? "bg-white text-zinc-950 shadow-none ring-1 ring-zinc-200 disabled:bg-white disabled:text-zinc-950 disabled:opacity-100 started-live"
+                      : "bg-emerald-600 text-white shadow-[0_12px_24px_-16px_rgba(5,150,105,0.9)] hover:bg-emerald-500 disabled:bg-emerald-300"
+                  }`}
+                  disabled={busy !== null || showStarted}
                   onClick={() => setConfirmCommandType("START")}
                 >
-                  {buttonLabel !== "START" && <PlayIcon />}
-                  {busy === "START" ? "Sending..." : buttonLabel === "START" ? "Started" : "START"}
+                  {!showStarted && busy !== "START" && <PlayIcon />}
+                  {busy === "START" ? "Sending..." : showStarted ? "Started" : "START"}
                 </button>
                 <button
-                  className={`relative flex min-h-16 items-center justify-center gap-3 overflow-hidden rounded-[22px] bg-rose-600 px-4 py-4 text-base font-semibold tracking-wide text-white shadow-[0_12px_24px_-16px_rgba(225,29,72,0.9)] transition hover:bg-rose-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-rose-300 sm:h-[88px] sm:text-lg ${buttonLabel === "STOP" ? "stopped-live" : ""}`}
-                  disabled={busy !== null}
+                  className={`relative flex min-h-16 items-center justify-center gap-3 overflow-hidden rounded-[22px] px-4 py-4 text-base font-semibold tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed sm:h-[88px] sm:text-lg ${
+                    showStopped
+                      ? "bg-white text-zinc-950 shadow-none ring-1 ring-zinc-200 disabled:bg-white disabled:text-zinc-950 disabled:opacity-100 stopped-live"
+                      : "bg-rose-600 text-white shadow-[0_12px_24px_-16px_rgba(225,29,72,0.9)] hover:bg-rose-500 disabled:bg-rose-300"
+                  }`}
+                  disabled={busy !== null || showStopped}
                   onClick={() => setConfirmCommandType("STOP")}
                 >
-                  {buttonLabel !== "STOP" && <StopIcon />}
-                  {busy === "STOP" ? "Sending..." : buttonLabel === "STOP" ? "Stopped" : "STOP"}
+                  {!showStopped && busy !== "STOP" && <StopIcon />}
+                  {busy === "STOP" ? "Sending..." : showStopped ? "Stopped" : "STOP"}
                 </button>
               </div>
             </section>
@@ -603,10 +645,14 @@ function Dashboard({
                   >
                     <p className={eyebrow}>Confirm</p>
                     <h4 className="mt-2 text-lg font-semibold tracking-tight text-zinc-950">
-                      Send {confirmCommandType}?
+                      {confirmCommandType === "START" && commanded === "START"
+                        ? `The motor is already started by ${startedByName}`
+                        : `Send ${confirmCommandType}?`}
                     </h4>
                     <p className="mt-1 text-sm text-zinc-500">
-                      This goes to the motor starter immediately.
+                      {confirmCommandType === "START" && commanded === "START"
+                        ? "It stays started until Stop is clicked."
+                        : "This goes to the motor starter immediately."}
                     </p>
                     <div className="mt-5 grid grid-cols-2 gap-2">
                       <button
@@ -618,6 +664,10 @@ function Dashboard({
                       <button
                         className={`rounded-2xl px-3 py-2.5 text-sm font-semibold text-white ${confirmCommandType === "START" ? "bg-emerald-600 hover:bg-emerald-500" : "bg-rose-600 hover:bg-rose-500"}`}
                         onClick={() => {
+                          if (confirmCommandType === "START" && commanded === "START") {
+                            setConfirmCommandType(null);
+                            return;
+                          }
                           const selected = confirmCommandType;
                           setConfirmCommandType(null);
                           void submitCommand(selected);
@@ -670,7 +720,7 @@ function Dashboard({
                             {command.type === "START" ? "started by" : "stopped by"} {command.actorName}
                           </p>
                           <p className="text-xs text-zinc-400">
-                            {new Date(command.createdAt).toLocaleString()}
+                            {formatWhen(command.createdAt)}
                           </p>
                         </div>
                       </div>
@@ -740,7 +790,7 @@ function Dashboard({
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-semibold">{house.name}</span>
                         <span className={`mt-0.5 block text-xs ${house.selected ? "text-zinc-400" : "text-zinc-500"}`}>
-                          {new Date(house.createdAt).toLocaleDateString()}
+                          {formatWhen(house.createdAt, false)}
                         </span>
                       </span>
                       <span
@@ -869,7 +919,7 @@ function Dashboard({
                         <span className="block truncate font-semibold text-zinc-950">{user.name || "Unnamed"}</span>
                         <span className="block truncate text-zinc-500">{user.email}</span>
                         <span className="mt-0.5 block text-[11px] text-zinc-400">
-                          Added {new Date(user.createdAt).toLocaleDateString()}
+                          Added {formatWhen(user.createdAt, false)}
                         </span>
                       </span>
                     </span>
@@ -1316,6 +1366,21 @@ function LoadingLabel({ label }: { label: string }) {
   );
 }
 
+function formatWhen(value: number, withTime = true) {
+  const date = new Date(value);
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+  const calendar = date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  if (!withTime) {
+    return `${weekday}, ${calendar}`;
+  }
+  const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${weekday}, ${calendar} ${time}`;
+}
+
 function formatRemaining(ms: number, maxSeconds?: number) {
   let total = Math.max(0, Math.floor(ms / 1000));
   if (maxSeconds !== undefined && Number.isFinite(maxSeconds)) {
@@ -1467,9 +1532,24 @@ function ProfileMenu({
   const [passwordAgain, setPasswordAgain] = useState("");
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutside = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    return () => document.removeEventListener("pointerdown", closeOnOutside);
+  }, [open, setOpen]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={menuRef}>
       <button onClick={() => setOpen(!open)}>
         <ProfilePill name={name} email={email} />
       </button>

@@ -227,10 +227,10 @@ export const status = query({
     if (lastCommand) {
       const actor = await ctx.db.get("users", lastCommand.createdBy);
       const actorLabel = actor?.name ?? actor?.email ?? "Someone";
-      if (deviceState.running) {
-        activityMessage = `Motor is ON by ${actorLabel}`;
+      if (lastCommand.type === "START") {
+        activityMessage = `Motor is started by ${actorLabel}`;
       } else {
-        activityMessage = `Motor is STOPPED by ${actorLabel}`;
+        activityMessage = `Motor is stopped by ${actorLabel}`;
       }
     }
 
